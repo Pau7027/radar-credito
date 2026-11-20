@@ -24,8 +24,7 @@ linhas = Visualizador.grafico_linhas(dados)
 barras = Visualizador.grafico_barras(dados)
 treemap = Visualizador.grafico_treemap(dados)
 
-# Em um futuro aplicativo Streamlit:
-# st.plotly_chart(linhas, use_container_width=True)
+# No aplicativo Streamlit, as figuras são exibidas com st.plotly_chart(...).
 ```
 
 O gráfico de linhas mostra a evolução por modalidade e calcula a média se houver
@@ -39,4 +38,21 @@ com apenas `data` e `valor`, como a devolvida por `FonteBCB`.
 
 Instale as dependências com `python -m pip install -r requirements.txt` e rode
 os testes com `python -m pytest tests/test_visualizador.py`.
+
+## Painel Streamlit
+
+`streamlit_app.py` mostra os três gráficos com filtros de período e modalidade.
+Ele usa os CSVs de cache já versionados em `data/`; portanto, o painel pode ser
+publicado sem uma chave de API, mas os valores **não se atualizam sozinhos**.
+
+Para rodar localmente, instale as dependências e execute:
+
+```bash
+python -m streamlit run streamlit_app.py
+```
+
+No Streamlit Community Cloud, selecione o repositório, a branch `main` e o
+arquivo principal `streamlit_app.py` depois de mesclar o pull request. O serviço
+instala as dependências declaradas em `requirements.txt`.
+
 
