@@ -80,3 +80,91 @@ class Indicador(ABC):
     def __repr__(self) -> str:
         """Representação textual do indicador."""
         return f"<{self.__class__.__name__}(nome='{self._nome}', unidade='{self._unidade}')>"
+
+
+class VariacaoVsMedia12m(Indicador):
+    """Mede o desvio da taxa atual em relação à média dos 12 meses anteriores.
+
+    O que mede:
+        Quanto a taxa de inadimplência do mês atual está acima ou abaixo
+        do padrão histórico recente dos últimos 12 meses.
+
+    Fórmula:
+        variacao_t = x_t - media(x_{t-12}, ..., x_{t-1})
+        Implementada como: serie - serie.rolling(12).mean().shift(1)
+
+    Unidade:
+        Pontos percentuais (p.p.).
+
+    Como interpretar:
+        - Valores positivos indicam aceleração recente da inadimplência (piora).
+        - Valores negativos indicam arrefecimento ou alívio (melhora).
+        - Valores próximos a zero indicam estabilidade em relação ao ano recente.
+
+    Limitação:
+        Exige 12 meses de histórico prévio (os 12 primeiros meses resultam em NaN)
+        e não diferencia se a oscilação decorre de choque atípico ou tendência estrutural.
+    """
+
+    def __init__(self, serie: pd.Series) -> None:
+        """Inicializa o indicador com a série temporal de inadimplência."""
+        super().__init__(
+            nome="Variação vs. Média de 12 Meses",
+            descricao="Desvio da taxa de inadimplência em relação à média dos 12 meses anteriores.",
+            unidade="p.p.",
+        )
+        self._serie = self._validar_serie(serie, "serie")
+
+    @property
+    def serie(self) -> pd.Series:
+        """Cópia da série temporal de entrada."""
+        return self._serie.copy()
+
+    def calcular(self) -> pd.Series:
+        """Calcula a variação mensal em relação à média móvel defasada de 12 meses."""
+        media_movel_12m = self._serie.rolling(12).mean().shift(1)
+        return self._serie - media_movel_12m
+
+
+class Volatilidade12m(Indicador):
+    """Mede a volatilidade e o risco de oscilação em janela móvel de 12 meses.
+
+    O que mede:
+        A dispersão e a incerteza da taxa de inadimplência medida pelo
+        desvio padrão amostral dos últimos 12 meses.
+
+    Fórmula:
+        vol_t = desvio_padrao(x_{t-11}, ..., x_t) com ddof=1
+        Implementada como: serie.rolling(12).std()
+
+    Unidade:
+        Pontos percentuais (p.p.).
+
+    Como interpretar:
+        - Valores elevados indicam períodos de instabilidade e oscilações bruscas.
+        - Valores baixos ou próximos a zero indicam trajetórias previsíveis e estáveis.
+        - Uma série estritamente constante resulta em volatilidade igual a zero.
+
+    Limitação:
+        Por ser calculada em pontos percentuais absolutos, não permite comparação
+        direta de volatilidade entre modalidades de patamares médios muito distintos
+        (para tal comparação, o coeficiente de variação relativo seria mais adequado).
+    """
+
+    def __init__(self, serie: pd.Series) -> None:
+        """Inicializa o indicador com a série temporal de inadimplência."""
+        super().__init__(
+            nome="Volatilidade Móvel de 12 Meses",
+            descricao="Desvio padrão amostral móvel de 12 meses da taxa de inadimplência.",
+            unidade="p.p.",
+        )
+        self._serie = self._validar_serie(serie, "serie")
+
+    @property
+    def serie(self) -> pd.Series:
+        """Cópia da série temporal de entrada."""
+        return self._serie.copy()
+
+    def calcular(self) -> pd.Series:
+        """Calcula o desvio padrão amostral móvel em janela de 12 meses."""
+        return self._serie.rolling(12).std()
