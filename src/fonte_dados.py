@@ -125,9 +125,15 @@ class FonteBCB(FonteDados):
         return os.path.join(self._pasta_cache, f"serie_{codigo}.csv")
 
     def _salvar_cache(self, tabela, codigo):
-        """Salva o DataFrame como CSV no diretório de cache."""
+        """Salva a série no cache, mesclando com os dados já existentes."""
         os.makedirs(self._pasta_cache, exist_ok=True)
-        tabela.to_csv(self._caminho_cache(codigo), index=False)
+        caminho = self._caminho_cache(codigo)
+        if os.path.exists(caminho):
+            antigo = pd.read_csv(caminho, parse_dates=["data"])
+            tabela = pd.concat([antigo, tabela], ignore_index=True)
+            tabela = tabela.drop_duplicates(subset="data", keep="last")
+        tabela = tabela.sort_values("data").reset_index(drop=True)
+        tabela.to_csv(caminho, index=False)
 
     def _carregar_cache(self, codigo):
         """Carrega o CSV de cache da série. Lança ErroFonteDados se não existir."""
