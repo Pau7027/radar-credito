@@ -232,3 +232,78 @@ class ZScore(Indicador):
             desvio_movel = self._serie.rolling(self._janela).std(ddof=1)
             desvio_seguro = desvio_movel.replace(0, np.nan)
             return (self._serie - media_movel) / desvio_seguro
+
+
+
+class JurosReais(Indicador):
+    """Calcula a taxa de juros real ex-post anualizada pela equação de Fisher.
+
+    O que mede:
+        A taxa de remuneração do capital descontada a inflação acumulada em 12 meses,
+        revelando o custo real do crédito na economia brasileira.
+
+    Fórmula:
+        Equação de Fisher: (1 + i) = (1 + r) * (1 + pi_12)
+        Logo: r = ((1 + i / 100) / (1 + pi_12) - 1) * 100
+        Onde:
+            - i: taxa Selic meta nominal (% ao ano).
+            - pi_12: inflação acumulada em 12 meses composta = prod_{m=0..11}(1 + ipca_m / 100) - 1.
+
+    Unidade:
+        Percentual ao ano (% a.a.).
+
+    Como interpretar:
+        - Valores positivos elevados indicam política monetária restritiva com
+          encarecimento real das parcelas e maior pressão sobre a inadimplência.
+        - Valores baixos ou negativos indicam juros reais brandos ou expansionistas.
+
+    Limitação:
+        Mede a taxa de juros real ex-post (baseada na inflação pretérita realizada),
+        enquanto as decisões econômicas dependem prioritariamente das expectativas
+        inflacionárias futuras (juro real ex-ante do Boletim Focus).
+    """
+
+    def __init__(self, selic: pd.Series, ipca_mensal: pd.Series) -> None:
+        """Inicializa o indicador com as séries de Selic (% a.a.) e IPCA mensal (% a.m.)."""
+        super().__init__(
+            nome="Taxa de Juros Reais (Equação de Fisher)",
+            descricao="Taxa Selic nominal descontada da inflação IPCA acumulada em 12 meses.",
+            unidade="% a.a.",
+        )
+        self._selic = self._validar_serie(selic, "selic")
+        self._ipca_mensal = self._validar_serie(ipca_mensal, "ipca_mensal")
+
+    @property
+    def selic(self) -> pd.Series:
+        """Cópia da série temporal da taxa Selic."""
+        return self._selic.copy()
+
+    @property
+    def ipca_mensal(self) -> pd.Series:
+        """Cópia da série temporal do IPCA mensal."""
+        return self._ipca_mensal.copy()
+
+    def calcular(self) -> pd.Series:
+        """Calcula a série de juros reais ex-post em % ao ano."""
+        fatores_ipca = 1.0 + self._ipca_mensal / 100.0
+        valores_ipca_12m = []
+        n_registros = len(fatores_ipca)
+
+        for i in range(n_registros):
+            if i < 11:
+                valores_ipca_12m.append(np.nan)
+            else:
+                janela = fatores_ipca.iloc[i - 11 : i + 1]
+                fator_acumulado = 1.0
+                for fator in janela:
+                    fator_acumulado *= float(fator)
+                valores_ipca_12m.append(fator_acumulado - 1.0)
+
+        ipca_12m = pd.Series(valores_ipca_12m, index=self._ipca_mensal.index)
+        tabela = pd.DataFrame({"selic": self._selic, "ipca_12m": ipca_12m})
+
+        fator_nominal = 1.0 + tabela["selic"] / 100.0
+        fator_inflacao = 1.0 + tabela["ipca_12m"]
+        juros_reais = (fator_nominal / fator_inflacao - 1.0) * 100.0
+
+        return juros_reais
