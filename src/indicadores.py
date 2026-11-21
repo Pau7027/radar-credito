@@ -168,3 +168,67 @@ class Volatilidade12m(Indicador):
     def calcular(self) -> pd.Series:
         """Calcula o desvio padrão amostral móvel em janela de 12 meses."""
         return self._serie.rolling(12).std()
+
+
+
+class ZScore(Indicador):
+    """Calcula o Z-score da taxa de inadimplência (global ou móvel).
+
+    O que mede:
+        Quantos desvios padrão uma observação mensal está afastada da média
+        histórica (global de todo o período ou móvel em janela fixada).
+
+    Fórmula:
+        z_t = (x_t - mu) / sigma
+        Onde mu e sigma sao calculados com ddof=1 (amostral).
+        Se janela for informada, utiliza media e desvio padrao moveis dessa janela.
+
+    Unidade:
+        Desvios padrão (adimensional).
+
+    Como interpretar:
+        - Valores entre -1 e +1 representam oscilações dentro do padrão normal.
+        - |z| > 2 indica meses atípicos de estresse severo ou alívio incomum.
+        - Se o desvio padrão for zero, retorna NaN sem levantar exceção.
+
+    Limitação:
+        O z-score global incorpora dados futuros de todo o período amostral e
+        pressupõe que a distribuição dos dados seja aproximadamente simétrica.
+    """
+
+    def __init__(self, serie: pd.Series, janela: int | None = None) -> None:
+        """Inicializa o indicador com a série e opcionalmente uma janela móvel."""
+        super().__init__(
+            nome="Z-Score da Inadimplência",
+            descricao="Afastamento padronizado em relação à média em unidades de desvio padrão.",
+            unidade="desvios padrão",
+        )
+        self._serie = self._validar_serie(serie, "serie")
+        if janela is not None:
+            if not isinstance(janela, int) or isinstance(janela, bool) or janela <= 1:
+                raise ValueError("O parâmetro 'janela' deve ser um número inteiro maior que 1.")
+        self._janela = janela
+
+    @property
+    def serie(self) -> pd.Series:
+        """Cópia da série temporal de entrada."""
+        return self._serie.copy()
+
+    @property
+    def janela(self) -> int | None:
+        """Tamanho da janela móvel ou None para z-score global."""
+        return self._janela
+
+    def calcular(self) -> pd.Series:
+        """Calcula a série padronizada de Z-score."""
+        if self._janela is None:
+            media = float(self._serie.mean())
+            desvio = float(self._serie.std(ddof=1))
+            if pd.isna(desvio) or desvio == 0:
+                return pd.Series(np.nan, index=self._serie.index)
+            return (self._serie - media) / desvio
+        else:
+            media_movel = self._serie.rolling(self._janela).mean()
+            desvio_movel = self._serie.rolling(self._janela).std(ddof=1)
+            desvio_seguro = desvio_movel.replace(0, np.nan)
+            return (self._serie - media_movel) / desvio_seguro
