@@ -63,9 +63,24 @@ os testes com `python -m pytest tests/test_visualizador.py`.
 
 ## Painel Streamlit
 
-`streamlit_app.py` mostra os três gráficos com filtros de período e modalidade.
-Ele usa os CSVs de cache já versionados em `data/`; portanto, o painel pode ser
-publicado sem uma chave de API, mas os valores **não se atualizam sozinhos**.
+O painel é estruturado pela classe `Dashboard` (em `src/dashboard.py`), que recebe via injeção de dependências:
+- Um objeto `AnalisadorDados` com os dados no formato longo (`data`, `modalidade`, `valor`);
+- Um dicionário com as classes de `Indicador` (`VariacaoVsMedia12m`, `Volatilidade12m`, `ZScore`);
+- Uma instância do `Visualizador`;
+- Título e descrição do projeto;
+- A lista de `series_folha` desagregadas sem sobreposição para as comparações;
+- Um DataFrame opcional `series_macro` para análises com a taxa Selic.
+
+O arquivo principal `streamlit_app.py` consulta as 7 séries de crédito na API SGS do Banco Central do Brasil utilizando `FonteBCB` com cache local versionado em `data/` (garantindo funcionamento contínuo mesmo sem conexão à internet).
+
+### Recursos da Interface:
+- **Filtros interativos na barra lateral:** seleção do intervalo de datas (`Data inicial` e `Data final`) e seleção múltipla de `Séries`.
+- **4 KPIs principais:** Inadimplência no fim do período (com variação mensal em p.p. e destaque semafórico), Variação vs. média de 12 meses, Volatilidade (12 meses) e Z-score histórico, calculados sobre o histórico completo de uma série de referência selecionada.
+- **4 Abas dinâmicas:**
+  - **Evolução:** gráfico de linhas com a trajetória temporal de todas as séries selecionadas;
+  - **Comparação:** ranking em gráfico de barras horizontais e mapa proporcional em treemap comparando as taxas médias das modalidades folha selecionadas;
+  - **Correlações:** matriz de correlação linear de Pearson em mapa de calor (heatmap) contemporâneo e relação com a Selic defasada (quando `series_macro` estiver configurada);
+  - **Tabela de dados:** visualização paginada e ordenada com data (`mm/aaaa`), série e taxa percentual formatada, além do total de registros exibidos.
 
 Para rodar localmente, instale as dependências e execute:
 
