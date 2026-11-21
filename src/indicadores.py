@@ -170,7 +170,6 @@ class Volatilidade12m(Indicador):
         return self._serie.rolling(12).std()
 
 
-
 class ZScore(Indicador):
     """Calcula o Z-score da taxa de inadimplência (global ou móvel).
 
@@ -232,7 +231,6 @@ class ZScore(Indicador):
             desvio_movel = self._serie.rolling(self._janela).std(ddof=1)
             desvio_seguro = desvio_movel.replace(0, np.nan)
             return (self._serie - media_movel) / desvio_seguro
-
 
 
 class JurosReais(Indicador):
@@ -307,7 +305,6 @@ class JurosReais(Indicador):
         juros_reais = (fator_nominal / fator_inflacao - 1.0) * 100.0
 
         return juros_reais
-
 
 
 class DefasagemOtima(Indicador):
