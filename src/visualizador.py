@@ -360,3 +360,113 @@ class Visualizador:
         )
         return figura
 
+    @staticmethod
+    def grafico_heatmap_correlacao(
+        dados: pd.DataFrame,
+        colunas: list[str] | None = None,
+        rotulos: dict[str, str] | None = None,
+    ) -> go.Figure:
+        """Matriz de correlação linear de Pearson em formato de mapa de calor.
+
+        O que mostra:
+            O mapa de calor (heatmap) apresenta a intensidade e o sentido das
+            associações lineares bivariadas (coeficiente de Pearson r) entre os
+            níveis contemporâneos das séries temporais informadas, sem defasagem.
+
+        Leitura das cores:
+            A escala divergente (RdBu_r) mapeia valores no intervalo [-1, 1],
+            com centro fixo em 0. Tons de azul representam correlação positiva
+            (séries que se movem conjuntamente na mesma direção), tons de
+            vermelho indicam correlação negativa (movimentos em direções opostas)
+            e tons neutros (brancos) apontam ausência de relação linear. Células
+            vazias representam séries com variância zero ou dados insuficientes.
+
+        Advertência estatística:
+            Correlação linear elevada entre os níveis de duas séries temporais
+            não implica causalidade mútua; trajetórias históricas com tendência
+            macroeconômica comum ou estacionalidade podem gerar correlações
+            espúrias. Relações com defasagem temporal devem ser investigadas por
+            meio do indicador ``DefasagemOtima`` e do gráfico de dispersão defasada.
+
+        Parâmetros:
+            dados: DataFrame no formato largo (uma coluna por série).
+            colunas: Lista opcional de colunas a incluir. Se omitido, utiliza
+                todas as colunas numéricas disponíveis, ignorando a coluna 'data'.
+            rotulos: Dicionário opcional mapeando o identificador da série para
+                um nome legível nos eixos.
+
+        Retorno:
+            Figura Plotly com o heatmap formatado.
+        """
+        if not isinstance(dados, pd.DataFrame):
+            raise TypeError("dados deve ser um pandas.DataFrame.")
+
+        tabela = dados.copy()
+
+        if colunas is not None:
+            if not isinstance(colunas, (list, tuple)):
+                raise TypeError("O parâmetro 'colunas' deve ser uma lista de strings.")
+            ausentes = []
+            for col in colunas:
+                if col not in tabela.columns:
+                    ausentes.append(col)
+            if ausentes:
+                raise ValueError(f"Colunas obrigatórias ausentes: {', '.join(ausentes)}.")
+            if len(colunas) < 2:
+                raise ValueError("São necessárias pelo menos 2 colunas para o heatmap de correlação.")
+
+            colunas_selecionadas = []
+            for col in colunas:
+                serie_num = pd.to_numeric(tabela[col], errors="coerce")
+                if serie_num.dropna().shape[0] < 3:
+                    raise ValueError(
+                        f"A coluna '{col}' não possui pelo menos 3 valores numéricos válidos."
+                    )
+                colunas_selecionadas.append(col)
+        else:
+            colunas_selecionadas = []
+            for col in tabela.columns:
+                if str(col).lower() == "data":
+                    continue
+                serie_num = pd.to_numeric(tabela[col], errors="coerce")
+                if serie_num.dropna().shape[0] >= 3:
+                    colunas_selecionadas.append(col)
+
+            if len(colunas_selecionadas) < 2:
+                raise ValueError(
+                    "São necessárias pelo menos 2 colunas numéricas válidas para o heatmap de correlação."
+                )
+
+        tabela_calculo = pd.DataFrame(index=tabela.index)
+        for col in colunas_selecionadas:
+            tabela_calculo[col] = pd.to_numeric(tabela[col], errors="coerce")
+
+        matriz_corr = tabela_calculo.corr(method="pearson")
+
+        dicionario_rotulos = rotulos if rotulos is not None else {}
+        rotulos_eixos = []
+        for col in matriz_corr.columns:
+            rotulos_eixos.append(dicionario_rotulos.get(col, str(col)))
+
+        figura = go.Figure(
+            data=go.Heatmap(
+                z=matriz_corr.values,
+                x=rotulos_eixos,
+                y=rotulos_eixos,
+                zmin=-1,
+                zmax=1,
+                zmid=0,
+                colorscale="RdBu_r",
+                texttemplate="%{z:.2f}",
+                hovertemplate="Correlação entre %{x} e %{y}: %{z:.2f}<extra></extra>",
+                colorbar=dict(title="Correlação de Pearson"),
+            )
+        )
+
+        figura.update_layout(
+            title="Matriz de correlação entre as séries",
+            xaxis=dict(tickangle=-45),
+            yaxis=dict(autorange="reversed"),
+        )
+        return figura
+
