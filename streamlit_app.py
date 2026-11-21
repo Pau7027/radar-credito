@@ -1,4 +1,4 @@
-"""Painel Streamlit com as séries de inadimplência em cache no repositório."""
+"""Painel Streamlit do RadarCrédito."""
 
 from pathlib import Path
 
@@ -6,73 +6,91 @@ import pandas as pd
 import streamlit as st
 
 from src.analisador import AnalisadorDados
+from src.dashboard import Dashboard
+from src.fonte_dados import FonteBCB
+from src.indicadores import VariacaoVsMedia12m, Volatilidade12m, ZScore
 from src.visualizador import Visualizador
 
+DATA_INICIO = "01/11/2016"
+DATA_FIM = "31/10/2026"
+PASTA_DADOS = Path(__file__).resolve().parent / "data"
 
 SERIES = {
     "Total": 21082,
+    "Pessoa jurídica": 21083,
     "Pessoa física": 21084,
-    "Cheque especial": 21113,
-    "Cartão de crédito": 21129,
+    "PF recursos livres": 21112,
+    "PF cheque especial": 21113,
+    "PF cartão de crédito": 21129,
+    "PF recursos direcionados": 21145,
 }
 
+SERIES_FOLHA = [
+    "PF cheque especial",
+    "PF cartão de crédito",
+    "PF recursos direcionados",
+]
 
-@st.cache_data
+
+@st.cache_data(ttl=3600)
 def carregar_dados() -> pd.DataFrame:
-    """Lê apenas os CSVs locais; o Visualizador não acessa a fonte de dados."""
-    pasta_dados = Path(__file__).resolve().parent / "data"
-    tabelas = []
-    for modalidade, codigo in SERIES.items():
-        tabela = pd.read_csv(pasta_dados / f"serie_{codigo}.csv", parse_dates=["data"])
-        tabela["modalidade"] = modalidade
-        tabelas.append(tabela)
-    return pd.concat(tabelas, ignore_index=True)
+    """Carrega as séries temporais via FonteBCB (com fallback de cache em data/)."""
+    fonte = FonteBCB(pasta_cache=str(PASTA_DADOS), tempo_limite=15)
+    tabelas_longas = []
+
+    for nome_amigavel, codigo in SERIES.items():
+        tabela = fonte.obter_serie(codigo, DATA_INICIO, DATA_FIM)
+        tabela_copia = tabela.copy()
+        tabela_copia["modalidade"] = nome_amigavel
+        tabelas_longas.append(tabela_copia[["data", "modalidade", "valor"]])
+
+    dados_completos = pd.concat(tabelas_longas, ignore_index=True)
+    dados_completos["data"] = pd.to_datetime(dados_completos["data"], errors="coerce")
+    dados_completos["valor"] = pd.to_numeric(dados_completos["valor"], errors="coerce")
+    return dados_completos
 
 
 def main() -> None:
-    st.set_page_config(page_title="Radar Crédito", layout="wide")
-    st.title("Radar Crédito")
-    st.caption("Inadimplência no Brasil · séries SGS do Banco Central salvas no repositório")
+    """Função principal que inicializa e renderiza o dashboard Streamlit."""
+    st.set_page_config(page_title="RadarCrédito", layout="wide")
 
     dados = carregar_dados()
-    primeira_data = dados["data"].min().date()
-    ultima_data = dados["data"].max().date()
+    analisador = AnalisadorDados(dados)
 
-    st.sidebar.header("Filtros")
-    inicio = st.sidebar.date_input(
-        "Data inicial", value=primeira_data, min_value=primeira_data, max_value=ultima_data
-    )
-    fim = st.sidebar.date_input(
-        "Data final", value=ultima_data, min_value=primeira_data, max_value=ultima_data
-    )
-    modalidades = st.sidebar.multiselect(
-        "Modalidades", options=list(SERIES), default=list(SERIES)
+    indicadores = {
+        "Variação vs. média de 12 meses": VariacaoVsMedia12m,
+        "Volatilidade (12 meses)": Volatilidade12m,
+        "Z-score": ZScore,
+    }
+
+    descricao = (
+        "Painel interativo com séries temporais de inadimplência da carteira de crédito "
+        "brasileira obtidas via API SGS do Banco Central do Brasil. A taxa de inadimplência "
+        "mede o percentual da carteira de crédito do Sistema Financeiro Nacional com "
+        "atrasos de pagamento superiores a 90 dias."
     )
 
-    if inicio > fim:
-        st.warning("A data inicial deve ser anterior ou igual à data final.")
-        st.stop()
-    if not modalidades:
-        st.warning("Selecione ao menos uma modalidade.")
-        st.stop()
+    # TODO: series_macro será preenchida quando a Selic (código 432, diária, em blocos de 10 anos)
+    # e o IPCA (código 433, variação mensal) forem integrados ao projeto.
+    series_macro = None
 
-    filtrados = AnalisadorDados(dados).filtrar(
-        inicio=inicio, fim=fim, modalidade=modalidades
+    dashboard = Dashboard(
+        analisador=analisador,
+        indicadores=indicadores,
+        visualizador=Visualizador(),
+        titulo="RadarCrédito",
+        descricao=descricao,
+        series_folha=SERIES_FOLHA,
+        series_macro=series_macro,
     )
-    if filtrados.empty:
-        st.info("Não há registros para os filtros escolhidos.")
-        st.stop()
 
-    st.plotly_chart(Visualizador.grafico_linhas(filtrados), width="stretch")
-    st.plotly_chart(Visualizador.grafico_barras(filtrados), width="stretch")
-    st.plotly_chart(Visualizador.grafico_treemap(filtrados), width="stretch")
-    st.caption(
-        "No treemap, a área compara taxas médias de inadimplência; "
-        "não representa volume de crédito nem participação de mercado."
-    )
-    st.caption(f"Última data disponível nos CSVs: {ultima_data:%d/%m/%Y}.")
+    dashboard.renderizar()
+
+    datas_validas = pd.to_datetime(dados["data"], errors="coerce").dropna()
+    if not datas_validas.empty:
+        ultima_data = datas_validas.max()
+        st.caption(f"Última data disponível nos dados: {ultima_data.strftime('%d/%m/%Y')}.")
 
 
 if __name__ == "__main__":
     main()
-
