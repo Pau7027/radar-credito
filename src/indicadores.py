@@ -307,3 +307,133 @@ class JurosReais(Indicador):
         juros_reais = (fator_nominal / fator_inflacao - 1.0) * 100.0
 
         return juros_reais
+
+
+
+class DefasagemOtima(Indicador):
+    """Calcula a defasagem temporal de maior correlação entre a Selic e a inadimplência.
+
+    O que mede:
+        O tempo de transmissão (em meses de atraso) no qual a taxa Selic apresenta
+        a maior associação linear com a taxa de inadimplência da carteira de crédito.
+
+    Fórmula:
+        Para cada defasagem k em [0, defasagem_maxima]:
+            corr_k = correlacao_pearson(Selic_{t-k}, Inadimplencia_t)
+        A defasagem ótima k* é o valor de k que maximiza |corr_k|.
+
+    Unidade:
+        Meses (para a defasagem) e índice adimensional de Pearson entre -1 e +1 (para a correlação).
+
+    Como interpretar:
+        - Uma correlação positiva em defasagem k indica que aumentos da Selic tendem
+          a ser sucedidos por elevação da inadimplência k meses adiante.
+        - O valor_atual() devolve a correlação ótima encontrada.
+
+    Limitação:
+        Correlação linear não implica relação de causa e efeito; duas séries com
+        tendências macroeconômicas concomitantes podem apresentar correlação espúria;
+        defasagens elevadas contam com menor número de pares de observações sincronizadas.
+    """
+
+    def __init__(
+        self,
+        selic: pd.Series,
+        inadimplencia: pd.Series,
+        defasagem_maxima: int = 24,
+    ) -> None:
+        """Inicializa o indicador com as séries de Selic, inadimplência e defasagem máxima."""
+        super().__init__(
+            nome="Defasagem Ótima Selic-Inadimplência",
+            descricao="Identifica a defasagem temporal com maior correlação entre Selic e inadimplência.",
+            unidade="meses",
+        )
+        self._selic = self._validar_serie(selic, "selic")
+        self._inadimplencia = self._validar_serie(inadimplencia, "inadimplencia")
+        if not isinstance(defasagem_maxima, int) or isinstance(defasagem_maxima, bool) or defasagem_maxima < 0:
+            raise ValueError(
+                "O parâmetro 'defasagem_maxima' deve ser um número inteiro não negativo."
+            )
+        self._defasagem_maxima = defasagem_maxima
+        self._defasagem_otima = None
+        self._correlacao_otima = None
+        self._resultado_tabela = None
+
+    @property
+    def selic(self) -> pd.Series:
+        """Cópia da série temporal da taxa Selic."""
+        return self._selic.copy()
+
+    @property
+    def inadimplencia(self) -> pd.Series:
+        """Cópia da série temporal da taxa de inadimplência."""
+        return self._inadimplencia.copy()
+
+    @property
+    def defasagem_maxima(self) -> int:
+        """Limite máximo de meses de defasagem testados."""
+        return self._defasagem_maxima
+
+    @property
+    def defasagem_otima(self) -> int:
+        """Número de meses de defasagem que maximiza o módulo da correlação."""
+        if self._defasagem_otima is None:
+            self.calcular()
+        return self._defasagem_otima
+
+    @property
+    def correlacao_otima(self) -> float:
+        """Coeficiente de correlação de Pearson na defasagem ótima (com sinal original)."""
+        if self._correlacao_otima is None:
+            self.calcular()
+        return self._correlacao_otima
+
+    def valor_atual(self) -> float:
+        """Sobrescreve o método base para retornar a correlação ótima encontrada."""
+        return self.correlacao_otima
+
+    def calcular(self) -> pd.DataFrame:
+        """Calcula a correlação de Pearson para cada defasagem de 0 até defasagem_maxima."""
+        linhas = []
+        maior_modulo = -1.0
+        otima_def = 0
+        otima_corr = np.nan
+
+        for k in range(self._defasagem_maxima + 1):
+            selic_defasada = self._selic.shift(k)
+            tabela_par = pd.DataFrame(
+                {"selic": selic_defasada, "inadimplencia": self._inadimplencia}
+            ).dropna()
+
+            n_observacoes = len(tabela_par)
+
+            if n_observacoes < 3:
+                correlacao = np.nan
+            else:
+                desvio_selic = tabela_par["selic"].std(ddof=1)
+                desvio_inad = tabela_par["inadimplencia"].std(ddof=1)
+                if desvio_selic == 0 or desvio_inad == 0 or pd.isna(desvio_selic) or pd.isna(desvio_inad):
+                    correlacao = np.nan
+                else:
+                    correlacao = float(tabela_par["selic"].corr(tabela_par["inadimplencia"]))
+
+            if pd.notna(correlacao):
+                modulo_atual = abs(correlacao)
+                if modulo_atual > maior_modulo:
+                    maior_modulo = modulo_atual
+                    otima_def = k
+                    otima_corr = correlacao
+
+            linhas.append(
+                {
+                    "defasagem": k,
+                    "correlacao": correlacao,
+                    "observacoes": n_observacoes,
+                }
+            )
+
+        self._defasagem_otima = otima_def
+        self._correlacao_otima = otima_corr
+        self._resultado_tabela = pd.DataFrame(linhas)
+
+        return self._resultado_tabela.copy()
