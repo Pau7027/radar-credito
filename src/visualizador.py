@@ -1,10 +1,12 @@
 """Gráficos interativos para tabelas de inadimplência.
 
-Os métodos recebem DataFrames prontos, no formato longo usado por
-``AnalisadorDados`` (data, modalidade, valor). Nenhum método consulta a API.
+Os métodos recebem DataFrames prontos, tanto no formato longo (data,
+modalidade, valor) quanto no formato largo (índice = data, uma coluna
+por série). Nenhum método consulta a API.
 ``valor`` representa uma taxa percentual: 5.2 significa 5,2%.
 """
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -158,5 +160,203 @@ class Visualizador:
             )
         )
         figura.update_layout(title="Taxa média por modalidade")
+        return figura
+
+    @staticmethod
+    def _ajustar_reta(
+        x: pd.Series | np.ndarray, y: pd.Series | np.ndarray
+    ) -> tuple[float, float, float]:
+        """Ajusta reta de regressão linear simples via mínimos quadrados ordinários.
+
+        Calcula a inclinação, o intercepto e o coeficiente de determinação (R²)
+        da relação linear entre as variáveis x e y. Também calcula o coeficiente
+        de correlação linear de Pearson r com numpy.corrcoef.
+
+        Parâmetros:
+            x: Série ou array com os valores da variável independente.
+            y: Série ou array com os valores da variável dependente.
+
+        Retorno:
+            Tupla contendo (inclinação, intercepto, R²).
+        """
+        x_arr = np.asarray(x, dtype=float)
+        y_arr = np.asarray(y, dtype=float)
+
+        matriz_corr = np.corrcoef(x_arr, y_arr)
+        _r = float(matriz_corr[0, 1])
+
+        inclinacao, intercepto = np.polyfit(x_arr, y_arr, 1)
+
+        y_pred = inclinacao * x_arr + intercepto
+        sq_res = float(np.sum((y_arr - y_pred) ** 2))
+        y_media = float(np.mean(y_arr))
+        sq_tot = float(np.sum((y_arr - y_media) ** 2))
+
+        if sq_tot == 0:
+            r2 = 0.0
+        else:
+            r2 = 1.0 - (sq_res / sq_tot)
+
+        if r2 < 0.0:
+            r2 = 0.0
+        elif r2 > 1.0:
+            r2 = 1.0
+
+        return float(inclinacao), float(intercepto), float(r2)
+
+    @staticmethod
+    def grafico_dispersao_defasada(
+        dados: pd.DataFrame,
+        coluna_x: str = "selic",
+        coluna_y: str = "inadimplencia",
+        defasagem: int = 0,
+        rotulo_x: str = "Selic meta (% a.a.)",
+        rotulo_y: str = "Inadimplência (%)",
+    ) -> go.Figure:
+        """Gráfico de dispersão com reta de regressão linear e defasagem temporal.
+
+        O que mostra:
+            A relação contemporânea ou defasada entre duas variáveis contínuas
+            (como taxa de juros Selic e taxa de inadimplência), acompanhada
+            pela reta de ajuste linear de mínimos quadrados e seu R².
+
+        Formato de entrada:
+            DataFrame no formato largo (uma coluna por série), com frequência
+            mensal. As séries diárias (como a taxa Selic) devem ser agregadas
+            previamente por mês antes do envio ao Visualizador. A data de
+            referência pode estar no índice (DatetimeIndex) ou em uma coluna
+            chamada 'data'. A data é utilizada exclusivamente para rotular
+            as observações no hover do gráfico.
+
+        Aplicação da defasagem:
+            O eixo X utiliza a série informada em ``coluna_x`` defasada em
+            ``defasagem`` meses (x_{t-k}), alinhada ao valor contemporâneo
+            y_t em ``coluna_y`` (através da operação shift sobre as linhas
+            previamente ordenadas por data).
+
+        Interpretação da reta e do R²:
+            A inclinação indica a variação esperada em pontos percentuais na
+            variável Y para cada aumento de uma unidade na variável X. O R²
+            (coeficiente de determinação) quantifica a proporção da variância
+            amostral de Y explicada linearmente por X.
+
+        Advertência estatística:
+            Correlação não é causalidade; duas séries temporais com tendência
+            concomitante (estacionalidade ou ciclo econômico) podem apresentar
+            correlação espúria mesmo sem relação direta de causa e efeito.
+
+        Exemplo de uso:
+            # visualizador.grafico_dispersao_defasada(
+            #     tabela_larga, "selic", "pessoa_fisica", defasagem=indicador.defasagem_otima
+            # )
+        """
+        if not isinstance(dados, pd.DataFrame):
+            raise TypeError("dados deve ser um pandas.DataFrame.")
+
+        ausentes = []
+        for col in (coluna_x, coluna_y):
+            if col not in dados.columns:
+                ausentes.append(col)
+        if ausentes:
+            raise ValueError(f"Colunas obrigatórias ausentes: {', '.join(ausentes)}.")
+
+        if isinstance(defasagem, bool) or not isinstance(defasagem, int):
+            raise TypeError("O parâmetro 'defasagem' deve ser um número inteiro.")
+        if defasagem < 0:
+            raise ValueError("O parâmetro 'defasagem' deve ser um número inteiro maior ou igual a zero.")
+
+        tabela = dados.copy()
+
+        datas_hover = None
+        if "data" in tabela.columns:
+            tabela["_data_temp"] = pd.to_datetime(tabela["data"], errors="coerce")
+            tabela = tabela.sort_values("_data_temp")
+            datas_hover = tabela["_data_temp"]
+        elif isinstance(tabela.index, pd.DatetimeIndex):
+            tabela = tabela.sort_index()
+            datas_hover = pd.to_datetime(tabela.index)
+
+        serie_x = pd.to_numeric(tabela[coluna_x], errors="coerce").shift(defasagem)
+        serie_y = pd.to_numeric(tabela[coluna_y], errors="coerce")
+
+        df_pares = pd.DataFrame({"x": serie_x, "y": serie_y}, index=tabela.index)
+        if datas_hover is not None:
+            df_pares["data"] = datas_hover
+
+        df_pares = df_pares.dropna(subset=["x", "y"])
+
+        if len(df_pares) < 3:
+            raise ValueError("Não há observações suficientes para o gráfico e o ajuste da reta.")
+
+        var_x = float(df_pares["x"].var())
+        var_y = float(df_pares["y"].var())
+        if var_x == 0 or var_y == 0 or np.isclose(var_x, 0) or np.isclose(var_y, 0):
+            raise ValueError("Não é possível ajustar a reta quando uma das séries possui variância zero.")
+
+        inclinacao, intercepto, r2 = Visualizador._ajustar_reta(df_pares["x"], df_pares["y"])
+
+        tem_data_valida = "data" in df_pares and df_pares["data"].notna().any()
+        if tem_data_valida:
+            textos_mes = []
+            for d in df_pares["data"]:
+                if pd.notna(d):
+                    textos_mes.append(pd.to_datetime(d).strftime("%m/%Y"))
+                else:
+                    textos_mes.append("")
+            hovertemplate_pontos = (
+                f"%{{customdata}}<br>{rotulo_x}: %{{x:.2f}}<br>{rotulo_y}: %{{y:.2f}}<extra></extra>"
+            )
+            traco_pontos = go.Scatter(
+                x=df_pares["x"],
+                y=df_pares["y"],
+                mode="markers",
+                name="Observações mensais",
+                customdata=textos_mes,
+                hovertemplate=hovertemplate_pontos,
+            )
+        else:
+            hovertemplate_pontos = (
+                f"{rotulo_x}: %{{x:.2f}}<br>{rotulo_y}: %{{y:.2f}}<extra></extra>"
+            )
+            traco_pontos = go.Scatter(
+                x=df_pares["x"],
+                y=df_pares["y"],
+                mode="markers",
+                name="Observações mensais",
+                hovertemplate=hovertemplate_pontos,
+            )
+
+        x_min = float(df_pares["x"].min())
+        x_max = float(df_pares["x"].max())
+        x_reta = [x_min, x_max]
+        y_reta = [inclinacao * x_min + intercepto, inclinacao * x_max + intercepto]
+
+        r2_formatado = f"{r2:.2f}".replace(".", ",")
+        nome_reta = f"Regressão linear (R² = {r2_formatado})"
+        traco_reta = go.Scatter(
+            x=x_reta,
+            y=y_reta,
+            mode="lines",
+            name=nome_reta,
+            hovertemplate=f"{nome_reta}<extra></extra>",
+        )
+
+        figura = go.Figure()
+        figura.add_trace(traco_pontos)
+        figura.add_trace(traco_reta)
+
+        if defasagem == 0:
+            titulo = f"Relação entre {rotulo_x} e {rotulo_y}"
+            titulo_x = rotulo_x
+        else:
+            titulo = f"{rotulo_x} defasada em {defasagem} meses vs. {rotulo_y}"
+            titulo_x = f"{rotulo_x} (defasada em {defasagem} meses)"
+
+        figura.update_layout(
+            title=titulo,
+            xaxis_title=titulo_x,
+            yaxis_title=rotulo_y,
+            legend_title="Legenda",
+        )
         return figura
 
