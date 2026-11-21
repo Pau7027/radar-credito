@@ -205,17 +205,51 @@ class Dashboard:
 
         return inicio, fim, series_selecionadas
 
-    def _encontrar_classe_indicador(self, nome_classe: str):
-        """Localiza a classe de indicador registrada correspondente ao nome informado."""
-        for rotulo, classe in self._indicadores.items():
-            if classe.__name__ == nome_classe:
-                return classe
-        return None
+    def _serie_historica(self, serie_referencia: str) -> pd.Series:
+        """Monta a série completa (todo o histórico) da série de referência."""
+        dados = self._analisador.dados
+        dados_ref = dados[dados[self._analisador.coluna_modalidade] == serie_referencia].copy()
+        dados_ref["_dt"] = pd.to_datetime(
+            dados_ref[self._analisador.coluna_data], errors="coerce"
+        )
+        dados_ref = dados_ref.dropna(subset=["_dt"]).sort_values("_dt")
+        valores = pd.to_numeric(dados_ref[self._analisador.coluna_valor], errors="coerce")
+        serie = pd.Series(valores.values, index=pd.DatetimeIndex(dados_ref["_dt"]))
+        return serie.dropna()
 
-    def _renderizar_kpis(
-        self, inicio, fim, series_selecionadas: list[str]
-    ) -> str:
-        """Calcula e renderiza os 4 cartões de métricas principais."""
+    def _valor_do_indicador(self, classe, serie_historica: pd.Series, fim) -> tuple:
+        """Calcula um indicador com o histórico completo e devolve (texto, ajuda).
+
+        O indicador é lido na data final do filtro. Só funciona com indicadores
+        cujo construtor recebe uma única série; os demais aparecem como '—'.
+        """
+        try:
+            indicador = classe(serie_historica)
+            resultado = indicador.calcular()
+        except (TypeError, ValueError):
+            return "—", None
+
+        descricao = indicador.descrever()
+        ajuda = (
+            f"{descricao['descricao']} Calculado com todo o histórico da série "
+            "e lido na data final selecionada."
+        )
+        if not isinstance(resultado, pd.Series):
+            return "—", ajuda
+
+        validos = resultado.dropna()
+        ate_fim = validos.loc[:pd.to_datetime(fim)]
+        if ate_fim.empty:
+            return "—", ajuda
+
+        valor = float(ate_fim.iloc[-1])
+        pode_ser_negativo = bool((validos < 0).any())
+        sinal = "+" if (valor > 0 and pode_ser_negativo) else ""
+        texto = f"{sinal}{self._formatar_numero(valor)} {descricao['unidade']}"
+        return texto, ajuda
+
+    def _renderizar_kpis(self, inicio, fim, series_selecionadas: list[str]) -> str:
+        """Renderiza o KPI de inadimplência e um cartão para cada indicador injetado."""
         idx_padrao = 0
         if "Total" in series_selecionadas:
             idx_padrao = series_selecionadas.index("Total")
@@ -226,117 +260,39 @@ class Dashboard:
             index=idx_padrao,
         )
 
-        dados_completos = self._analisador.dados
-        dados_ref = dados_completos[
-            dados_completos[self._analisador.coluna_modalidade] == serie_referencia
-        ].copy()
-        dados_ref["_dt"] = pd.to_datetime(
-            dados_ref[self._analisador.coluna_data], errors="coerce"
-        )
-        dados_ref = dados_ref.dropna(subset=["_dt"]).sort_values("_dt")
+        serie_historica = self._serie_historica(serie_referencia)
+        serie_ate_fim = serie_historica.loc[:pd.to_datetime(fim)]
 
-        serie_historica = pd.Series(
-            pd.to_numeric(dados_ref[self._analisador.coluna_valor], errors="coerce").values,
-            index=pd.DatetimeIndex(dados_ref["_dt"]),
-        ).dropna()
-
-        serie_ate_fim = serie_historica.loc[:pd.to_datetime(fim)].dropna()
-
-        # KPI 1: Inadimplência no fim do período
+        valor_inad = "—"
+        delta_inad = None
         if not serie_ate_fim.empty:
-            val_atual = float(serie_ate_fim.iloc[-1])
-            val_kpi1 = f"{self._formatar_numero(val_atual)}%"
+            atual = float(serie_ate_fim.iloc[-1])
+            valor_inad = f"{self._formatar_numero(atual)}%"
             if len(serie_ate_fim) >= 2:
-                val_anterior = float(serie_ate_fim.iloc[-2])
-                diff = val_atual - val_anterior
-                sinal = "+" if diff > 0 else ""
-                delta_kpi1 = f"{sinal}{self._formatar_numero(diff)} p.p."
-            else:
-                delta_kpi1 = None
-        else:
-            val_kpi1 = "—"
-            delta_kpi1 = None
+                diferenca = atual - float(serie_ate_fim.iloc[-2])
+                sinal = "+" if diferenca > 0 else ""
+                delta_inad = f"{sinal}{self._formatar_numero(diferenca)} p.p."
 
-        # KPI 2: Variação vs. média de 12 meses
-        val_kpi2 = "—"
-        classe_var = self._encontrar_classe_indicador("VariacaoVsMedia12m")
-        if classe_var is not None and len(serie_historica) >= 2:
-            try:
-                indicador_var = classe_var(serie_historica)
-                res_var = indicador_var.calcular().loc[:pd.to_datetime(fim)].dropna()
-                if not res_var.empty:
-                    v2 = float(res_var.iloc[-1])
-                    sinal2 = "+" if v2 > 0 else ""
-                    val_kpi2 = f"{sinal2}{self._formatar_numero(v2)} p.p."
-            except ValueError:
-                val_kpi2 = "—"
-
-        # KPI 3: Volatilidade (12 meses)
-        val_kpi3 = "—"
-        classe_vol = self._encontrar_classe_indicador("Volatilidade12m")
-        if classe_vol is not None and len(serie_historica) >= 2:
-            try:
-                indicador_vol = classe_vol(serie_historica)
-                res_vol = indicador_vol.calcular().loc[:pd.to_datetime(fim)].dropna()
-                if not res_vol.empty:
-                    v3 = float(res_vol.iloc[-1])
-                    val_kpi3 = f"{self._formatar_numero(v3)} p.p."
-            except ValueError:
-                val_kpi3 = "—"
-
-        # KPI 4: Z-score histórico
-        val_kpi4 = "—"
-        classe_z = self._encontrar_classe_indicador("ZScore")
-        if classe_z is not None and len(serie_historica) >= 2:
-            try:
-                indicador_z = classe_z(serie_historica)
-                res_z = indicador_z.calcular().loc[:pd.to_datetime(fim)].dropna()
-                if not res_z.empty:
-                    v4 = float(res_z.iloc[-1])
-                    sinal4 = "+" if v4 > 0 else ""
-                    val_kpi4 = f"{sinal4}{self._formatar_numero(v4)}"
-            except ValueError:
-                val_kpi4 = "—"
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric(
+        colunas = st.columns(1 + len(self._indicadores))
+        colunas[0].metric(
             label="Inadimplência no fim do período",
-            value=val_kpi1,
-            delta=delta_kpi1,
+            value=valor_inad,
+            delta=delta_inad,
             delta_color="inverse",
             help=(
-                "Taxa de inadimplência da série de referência na data final selecionada "
-                "e variação em relação ao mês anterior (em pontos percentuais)."
+                "Taxa de inadimplência da série de referência na data final "
+                "selecionada e variação em relação ao mês anterior (em p.p.)."
             ),
         )
-        col2.metric(
-            label="Variação vs. média de 12m",
-            value=val_kpi2,
-            help=(
-                "Diferença em pontos percentuais entre a taxa atual e a média dos "
-                "12 meses anteriores. Exige ao menos 12 meses de histórico prévio."
-            ),
-        )
-        col3.metric(
-            label="Volatilidade (12 meses)",
-            value=val_kpi3,
-            help=(
-                "Desvio padrão amostral móvel de 12 meses da taxa de inadimplência "
-                "em pontos percentuais. Exige ao menos 12 meses de histórico."
-            ),
-        )
-        col4.metric(
-            label="Z-score histórico",
-            value=val_kpi4,
-            help=(
-                "Número de desvios padrão que a taxa do mês final está afastada "
-                "da média histórica. Utiliza a média e o desvio padrão de todo o "
-                "histórico da série, e não apenas do período filtrado."
-            ),
-        )
+
+        # Polimorfismo: todos os indicadores são tratados do mesmo jeito.
+        posicao = 1
+        for rotulo, classe in self._indicadores.items():
+            texto, ajuda = self._valor_do_indicador(classe, serie_historica, fim)
+            colunas[posicao].metric(label=rotulo, value=texto, help=ajuda)
+            posicao += 1
 
         return serie_referencia
-
     def _renderizar_abas(
         self,
         inicio,
