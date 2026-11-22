@@ -34,12 +34,16 @@ class Visualizador:
             raise ValueError("Não há valores numéricos válidos para o gráfico.")
         return tabela
 
+    
     @staticmethod
     def grafico_linhas(
         dados: pd.DataFrame,
         coluna_data: str = "data",
         coluna_modalidade: str = "modalidade",
         coluna_valor: str = "valor",
+        titulo: str = "Evolução da inadimplência",
+        rotulo_y: str = "Taxa de inadimplência (%)",
+        titulo_legenda: str = "Modalidade",
     ) -> go.Figure:
         """Mostra a evolução temporal de cada modalidade.
 
@@ -79,11 +83,11 @@ class Visualizador:
                 )
             )
         figura.update_layout(
-            title="Evolução da inadimplência",
+            title=titulo,
             xaxis_title="Data",
-            yaxis_title="Taxa de inadimplência (%)",
+            yaxis_title=rotulo_y,
             hovermode="x unified",
-            legend_title="Modalidade",
+            legend_title=titulo_legenda,
         )
         return figura
 

@@ -6,8 +6,7 @@ from abc import ABC, abstractmethod
 import pandas as pd
 import requests
 
-# TODO: séries diárias (ex: Selic, código 432) exigem consultas em blocos de
-# até 10 anos por requisição. Implementar na issue futura.
+
 
 
 class ErroFonteDados(Exception):
@@ -76,7 +75,7 @@ class FonteBCB(FonteDados):
         local e filtra pelo período pedido.
         """
         try:
-            tabela = self._consultar_api(codigo, data_inicio, data_fim)
+            tabela = self._consultar_em_blocos(codigo, data_inicio, data_fim)
             self._salvar_cache(tabela, codigo)
             return tabela
         except (requests.RequestException, ValueError, ErroFonteDados) as erro:
@@ -85,7 +84,41 @@ class FonteBCB(FonteDados):
             return self._filtrar_periodo(tabela_cache, data_inicio, data_fim)
 
     # --- métodos privados de apoio ---
+    
+    def _dividir_em_blocos(self, data_inicio, data_fim, anos_por_bloco=5):
+        """Divide o período em blocos de poucos anos.
 
+        A API do BCB aceita no máximo 10 anos por consulta, e séries diárias
+        (como a Selic, código 432) estouram esse limite com facilidade.
+        Datas no formato 'dd/mm/aaaa'.
+        """
+        inicio = pd.to_datetime(data_inicio, format="%d/%m/%Y")
+        fim = pd.to_datetime(data_fim, format="%d/%m/%Y")
+        blocos = []
+        atual = inicio
+        while atual <= fim:
+            fim_bloco = atual + pd.DateOffset(years=anos_por_bloco) - pd.Timedelta(days=1)
+            if fim_bloco > fim:
+                fim_bloco = fim
+            blocos.append((atual.strftime("%d/%m/%Y"), fim_bloco.strftime("%d/%m/%Y")))
+            atual = fim_bloco + pd.Timedelta(days=1)
+        return blocos
+
+    def _consultar_em_blocos(self, codigo, data_inicio, data_fim):
+        """Consulta a API bloco a bloco e junta tudo em um único DataFrame."""
+        tabelas = []
+        for inicio_bloco, fim_bloco in self._dividir_em_blocos(data_inicio, data_fim):
+            try:
+                tabelas.append(self._consultar_api(codigo, inicio_bloco, fim_bloco))
+            except ErroFonteDados:
+                continue  # bloco sem dados publicados (por exemplo, meses futuros)
+        if not tabelas:
+            raise ErroFonteDados(f"A série {codigo} não retornou dados.")
+        tabela = pd.concat(tabelas, ignore_index=True)
+        tabela = tabela.drop_duplicates(subset="data").sort_values("data")
+        return tabela.reset_index(drop=True)
+    
+    
     def _consultar_api(self, codigo, data_inicio, data_fim):
         """Faz a requisição à API SGS e devolve um DataFrame limpo."""
         url = self._url_base.format(codigo=codigo)
@@ -120,10 +153,13 @@ class FonteBCB(FonteDados):
         mascara = (tabela["data"] >= inicio) & (tabela["data"] <= fim)
         return tabela.loc[mascara].copy()
 
+    
     def _caminho_cache(self, codigo):
         """Devolve o caminho completo do arquivo CSV de cache da série."""
         return os.path.join(self._pasta_cache, f"serie_{codigo}.csv")
 
+    
+    
     def _salvar_cache(self, tabela, codigo):
         """Salva a série no cache, mesclando com os dados já existentes."""
         os.makedirs(self._pasta_cache, exist_ok=True)
@@ -135,6 +171,8 @@ class FonteBCB(FonteDados):
         tabela = tabela.sort_values("data").reset_index(drop=True)
         tabela.to_csv(caminho, index=False)
 
+    
+    
     def _carregar_cache(self, codigo):
         """Carrega o CSV de cache da série. Lança ErroFonteDados se não existir."""
         caminho = self._caminho_cache(codigo)

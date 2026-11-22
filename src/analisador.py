@@ -161,6 +161,27 @@ class AnalisadorDados:
         return pd.concat(colunas, axis=1, join="outer").sort_index()
 
     @staticmethod
+    def agregar_mensal(tabela: pd.DataFrame, operacao: str = "ultimo") -> pd.DataFrame:
+        """Converte uma série diária (data, valor) em mensal, com data no dia 1 do mês.
+
+        operacao: 'ultimo' (último valor do mês, indicado para a Selic meta)
+                  ou 'media' (média do mês).
+        """
+        if "data" not in tabela.columns or "valor" not in tabela.columns:
+            raise ValueError("A tabela precisa ter as colunas 'data' e 'valor'.")
+        if operacao not in {"ultimo", "media"}:
+            raise ValueError("Operação deve ser 'ultimo' ou 'media'.")
+
+        serie = tabela.set_index("data")["valor"].sort_index()
+        grupos = serie.groupby(serie.index.to_period("M"))
+        if operacao == "ultimo":
+            resultado = grupos.last()
+        else:
+            resultado = grupos.mean()
+        resultado.index = resultado.index.to_timestamp()
+        resultado.index.name = "data"
+        return resultado.reset_index()
+    @staticmethod
     def largo_para_longo(tabela_larga: pd.DataFrame) -> pd.DataFrame:
         """Converte uma tabela larga (índice=data, colunas=modalidades) para o formato longo.
 

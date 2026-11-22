@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from src.analisador import AnalisadorDados
-from src.indicadores import Indicador
+from src.indicadores import DefasagemOtima, Indicador, JurosReais
 from src.visualizador import Visualizador
 
 
@@ -355,7 +355,7 @@ class Dashboard:
                 coluna_modalidade=self._analisador.coluna_modalidade,
                 coluna_valor=self._analisador.coluna_valor,
             )
-
+            tabela_larga = self._juntar_macro(tabela_larga)
             colunas_validas = []
             for col in tabela_larga.columns:
                 if tabela_larga[col].dropna().shape[0] >= 3:
@@ -368,7 +368,10 @@ class Dashboard:
                 )
             else:
                 try:
-                    fig_heat = self._visualizador.grafico_heatmap_correlacao(tabela_larga)
+                    fig_heat = self._visualizador.grafico_heatmap_correlacao(
+                        tabela_larga[colunas_validas],
+                        rotulos={"selic": "Selic meta (% a.a.)", "ipca": "IPCA (% a.m.)"},
+                    )
                     st.plotly_chart(fig_heat, width="stretch")
                     # TODO (issue #9): texto interpretativo
                 except ValueError as erro:
@@ -441,7 +444,7 @@ class Dashboard:
                     "for integrada ao projeto."
                 )
                 # TODO (issue #9): texto interpretativo
-
+            self._renderizar_juros_reais(inicio, fim)
         with aba_tabela:
             dados_tabela = dados_filtrados.copy()
             dados_tabela["_dt"] = pd.to_datetime(
@@ -477,6 +480,69 @@ class Dashboard:
 
             st.dataframe(df_exibicao, width="stretch", hide_index=True)
             st.caption(f"Total de registros exibidos: {len(df_exibicao)}.")
+    
+    
+    def _macro_com_indice(self) -> pd.DataFrame:
+        """Devolve as séries macro com índice de datas (ou DataFrame vazio)."""
+        if self._series_macro is None:
+            return pd.DataFrame()
+        macro = self._series_macro.copy()
+        if not isinstance(macro.index, pd.DatetimeIndex):
+            if "data" in macro.columns:
+                macro = macro.set_index(pd.to_datetime(macro["data"]))
+            else:
+                macro.index = pd.to_datetime(macro.index)
+        return macro.sort_index()
+
+    def _juntar_macro(self, tabela_larga: pd.DataFrame) -> pd.DataFrame:
+        """Acrescenta Selic e IPCA (se existirem) à tabela larga, pelas datas."""
+        macro = self._macro_com_indice()
+        colunas = []
+        for nome in ("selic", "ipca"):
+            if nome in macro.columns:
+                colunas.append(nome)
+        if not colunas:
+            return tabela_larga
+        return tabela_larga.join(macro[colunas], how="left")
+
+    def _renderizar_juros_reais(self, inicio, fim) -> None:
+        """Mostra os juros reais (Fisher) quando Selic e IPCA estão disponíveis."""
+        macro = self._macro_com_indice()
+        if "selic" not in macro.columns or "ipca" not in macro.columns:
+            return
+
+        st.markdown("### Juros reais (equação de Fisher)")
+        try:
+            selic = pd.to_numeric(macro["selic"], errors="coerce").dropna()
+            ipca = pd.to_numeric(macro["ipca"], errors="coerce").dropna()
+            juros = JurosReais(selic, ipca).calcular().dropna()
+        except ValueError as erro:
+            st.warning(str(erro))
+            return
+
+        juros = juros.loc[pd.to_datetime(inicio):pd.to_datetime(fim)]
+        if juros.empty:
+            st.info("Não há juros reais calculados para o período selecionado.")
+            return
+
+        tabela = pd.DataFrame(
+            {"data": juros.index, "modalidade": "Juros reais ex-post", "valor": juros.values}
+        )
+        try:
+            figura = self._visualizador.grafico_linhas(
+                tabela,
+                titulo="Juros reais (Selic meta descontada do IPCA em 12 meses)",
+                rotulo_y="Juros reais (% a.a.)",
+                titulo_legenda="Indicador",
+            )
+            st.plotly_chart(figura, width="stretch")
+        except ValueError as erro:
+            st.warning(str(erro))
+        st.caption(
+            "Juros reais ex-post: (1 + Selic) / (1 + IPCA acumulado em 12 meses) - 1, "
+            "usando a Selic meta no fim de cada mês."
+        )
+        # TODO (issue #9): texto interpretativo
 
     @staticmethod
     def _tabela_larga(
