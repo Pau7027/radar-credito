@@ -14,6 +14,9 @@ from src.visualizador import Visualizador
 DATA_INICIO = "01/11/2016"
 DATA_FIM = "31/10/2026"
 PASTA_DADOS = Path(__file__).resolve().parent / "data"
+DATA_INICIO_MACRO = "01/11/2015"
+CODIGO_SELIC = 432
+CODIGO_IPCA = 433
 
 SERIES = {
     "Total": 21082,
@@ -49,6 +52,17 @@ def carregar_dados() -> pd.DataFrame:
     dados_completos["valor"] = pd.to_numeric(dados_completos["valor"], errors="coerce")
     return dados_completos
 
+@st.cache_data(ttl=3600)
+def carregar_macro() -> pd.DataFrame:
+    """Carrega a Selic meta (432, diária) e o IPCA (433, mensal) em uma tabela mensal."""
+    fonte = FonteBCB(pasta_cache=str(PASTA_DADOS), tempo_limite=15)
+
+    selic_diaria = fonte.obter_serie(CODIGO_SELIC, DATA_INICIO_MACRO, DATA_FIM)
+    selic_mensal = AnalisadorDados.agregar_mensal(selic_diaria, "ultimo")
+    ipca = fonte.obter_serie(CODIGO_IPCA, DATA_INICIO_MACRO, DATA_FIM)
+
+    return AnalisadorDados.unir_series({"selic": selic_mensal, "ipca": ipca})
+
 
 def main() -> None:
     """Função principal que inicializa e renderiza o dashboard Streamlit."""
@@ -70,9 +84,7 @@ def main() -> None:
         "atrasos de pagamento superiores a 90 dias."
     )
 
-    # TODO: series_macro será preenchida quando a Selic (código 432, diária, em blocos de 10 anos)
-    # e o IPCA (código 433, variação mensal) forem integrados ao projeto.
-    series_macro = None
+    series_macro = carregar_macro()
 
     dashboard = Dashboard(
         analisador=analisador,
