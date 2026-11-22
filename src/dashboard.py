@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from src.analisador import AnalisadorDados
+from src.analise_interpretativa import AnaliseInterpretativa
 from src.indicadores import DefasagemOtima, Indicador, JurosReais
 from src.visualizador import Visualizador
 
@@ -36,6 +37,7 @@ class Dashboard:
         ),
         series_folha: list[str] | None = None,
         series_macro: pd.DataFrame | None = None,
+        analise: AnaliseInterpretativa | None = None,
     ) -> None:
         """Inicializa o Dashboard com suas dependências e configurações.
 
@@ -55,6 +57,8 @@ class Dashboard:
                 para uso nos gráficos de ranking e treemap da aba Comparação.
             series_macro: DataFrame mensal opcional contendo séries macroeconômicas
                 (como a taxa 'selic').
+            analise: Instância opcional de AnaliseInterpretativa com os textos que
+                explicam os gráficos, respondem às perguntas e listam as limitações.
         """
         if not isinstance(analisador, AnalisadorDados):
             raise TypeError("O parâmetro 'analisador' deve ser uma instância de AnalisadorDados.")
@@ -89,6 +93,9 @@ class Dashboard:
         if series_macro is not None and not isinstance(series_macro, pd.DataFrame):
             raise TypeError("O parâmetro 'series_macro' deve ser um pandas.DataFrame.")
 
+        if analise is not None and not isinstance(analise, AnaliseInterpretativa):
+            raise TypeError("O parâmetro 'analise' deve ser uma instância de AnaliseInterpretativa.")
+
         if not isinstance(titulo, str):
             raise TypeError("O parâmetro 'titulo' deve ser uma string.")
 
@@ -102,6 +109,7 @@ class Dashboard:
         self._descricao = descricao
         self._series_folha = list(series_folha) if series_folha is not None else None
         self._series_macro = series_macro.copy() if series_macro is not None else None
+        self._analise = analise
 
     # --- Propriedades de leitura ---
 
@@ -139,6 +147,11 @@ class Dashboard:
     def series_macro(self) -> pd.DataFrame | None:
         """DataFrame com séries macroeconômicas ou None."""
         return self._series_macro.copy() if self._series_macro is not None else None
+
+    @property
+    def analise(self) -> AnaliseInterpretativa | None:
+        """Análise interpretativa injetada ou None."""
+        return self._analise
 
     # --- Método público principal ---
 
@@ -305,8 +318,8 @@ class Dashboard:
             inicio=inicio, fim=fim, modalidade=series_selecionadas
         )
 
-        aba_evolucao, aba_comparacao, aba_correlacoes, aba_tabela = st.tabs(
-            ["Evolução", "Comparação", "Correlações", "Tabela de dados"]
+        aba_evolucao, aba_comparacao, aba_correlacoes, aba_analise, aba_tabela = st.tabs(
+            ["Evolução", "Comparação", "Correlações", "Análise e conclusões", "Tabela de dados"]
         )
 
         with aba_evolucao:
@@ -315,7 +328,16 @@ class Dashboard:
                 st.plotly_chart(fig_linhas, width="stretch")
             except ValueError as erro:
                 st.warning(str(erro))
-            # TODO (issue #9): texto interpretativo
+
+            resumo = ""
+            if self._analise is not None:
+                resumo = self._analise.resumo_evolucao(
+                    dados_filtrados,
+                    coluna_data=self._analisador.coluna_data,
+                    coluna_modalidade=self._analisador.coluna_modalidade,
+                    coluna_valor=self._analisador.coluna_valor,
+                )
+            self._mostrar_leitura("evolucao", resumo)
 
         with aba_comparacao:
             series_folha_validas = []
@@ -336,7 +358,16 @@ class Dashboard:
                 try:
                     fig_barras = self._visualizador.grafico_barras(dados_folha)
                     st.plotly_chart(fig_barras, width="stretch")
-                    # TODO (issue #9): texto interpretativo
+
+                    resumo = ""
+                    if self._analise is not None:
+                        resumo = self._analise.resumo_comparacao(
+                            dados_folha,
+                            coluna_data=self._analisador.coluna_data,
+                            coluna_modalidade=self._analisador.coluna_modalidade,
+                            coluna_valor=self._analisador.coluna_valor,
+                        )
+                    self._mostrar_leitura("ranking", resumo)
 
                     fig_treemap = self._visualizador.grafico_treemap(dados_folha)
                     st.plotly_chart(fig_treemap, width="stretch")
@@ -344,7 +375,7 @@ class Dashboard:
                         "No treemap, a área compara taxas médias de inadimplência; "
                         "não representa volume de crédito nem participação de mercado."
                     )
-                    # TODO (issue #9): texto interpretativo
+                    self._mostrar_leitura("treemap")
                 except ValueError as erro:
                     st.warning(str(erro))
 
@@ -373,7 +404,11 @@ class Dashboard:
                         rotulos={"selic": "Selic meta (% a.a.)", "ipca": "IPCA (% a.m.)"},
                     )
                     st.plotly_chart(fig_heat, width="stretch")
-                    # TODO (issue #9): texto interpretativo
+
+                    resumo = ""
+                    if self._analise is not None:
+                        resumo = self._analise.resumo_heatmap(tabela_larga[colunas_validas])
+                    self._mostrar_leitura("heatmap", resumo)
                 except ValueError as erro:
                     st.warning(str(erro))
 
@@ -404,7 +439,13 @@ class Dashboard:
 
                     from src.indicadores import DefasagemOtima
 
-                    indicador_def = DefasagemOtima(serie_selic, serie_ref)
+                    df_macro_par = pd.DataFrame(
+                        {"selic": serie_selic, "inadimplencia": serie_ref}
+                    ).dropna()
+
+                    indicador_def = DefasagemOtima(
+                        df_macro_par["selic"], df_macro_par["inadimplencia"]
+                    )
                     def_otima = indicador_def.defasagem_otima
                     corr_otima = indicador_def.correlacao_otima
 
@@ -422,10 +463,6 @@ class Dashboard:
                         value=def_otima,
                     )
 
-                    df_macro_par = pd.DataFrame(
-                        {"selic": serie_selic, "inadimplencia": serie_ref}
-                    ).dropna()
-
                     fig_disp = self._visualizador.grafico_dispersao_defasada(
                         df_macro_par,
                         coluna_x="selic",
@@ -435,7 +472,13 @@ class Dashboard:
                         rotulo_y=f"Inadimplência - {serie_referencia} (%)",
                     )
                     st.plotly_chart(fig_disp, width="stretch")
-                    # TODO (issue #9): texto interpretativo
+
+                    resumo = ""
+                    if self._analise is not None:
+                        resumo = self._analise.resumo_dispersao(
+                            serie_referencia, def_otima, corr_otima, slider_def
+                        )
+                    self._mostrar_leitura("dispersao", resumo)
                 except ValueError as erro:
                     st.warning(str(erro))
             else:
@@ -445,6 +488,10 @@ class Dashboard:
                 )
                 # TODO (issue #9): texto interpretativo
             self._renderizar_juros_reais(inicio, fim)
+
+        with aba_analise:
+            self._renderizar_conclusoes()
+
         with aba_tabela:
             dados_tabela = dados_filtrados.copy()
             dados_tabela["_dt"] = pd.to_datetime(
@@ -482,6 +529,36 @@ class Dashboard:
             st.caption(f"Total de registros exibidos: {len(df_exibicao)}.")
     
     
+    def _mostrar_leitura(self, chave: str, resumo: str = "") -> None:
+        """Mostra o texto interpretativo de um gráfico, se a análise foi injetada."""
+        if self._analise is None:
+            return
+        with st.expander("Como interpretar este gráfico", expanded=True):
+            if resumo:
+                st.markdown(resumo)
+            st.markdown(self._analise.texto(chave))
+
+    def _renderizar_conclusoes(self) -> None:
+        """Renderiza respostas às perguntas, conclusões e limitações."""
+        if self._analise is None:
+            st.info("A análise interpretativa não foi configurada para este painel.")
+            return
+
+        st.subheader("Respostas às perguntas do projeto")
+        st.caption(
+            f"Os textos desta aba descrevem o período completo "
+            f"({self._analise.periodo_referencia}) e não mudam com os filtros."
+        )
+        for pergunta, resposta in self._analise.perguntas_e_respostas():
+            with st.expander(pergunta, expanded=False):
+                st.markdown(resposta)
+
+        st.subheader("Conclusões")
+        st.markdown(self._analise.conclusoes())
+
+        st.subheader("Limitações")
+        st.markdown(self._analise.limitacoes())
+
     def _macro_com_indice(self) -> pd.DataFrame:
         """Devolve as séries macro com índice de datas (ou DataFrame vazio)."""
         if self._series_macro is None:
@@ -542,7 +619,11 @@ class Dashboard:
             "Juros reais ex-post: (1 + Selic) / (1 + IPCA acumulado em 12 meses) - 1, "
             "usando a Selic meta no fim de cada mês."
         )
-        # TODO (issue #9): texto interpretativo
+
+        resumo = ""
+        if self._analise is not None:
+            resumo = self._analise.resumo_juros_reais(juros)
+        self._mostrar_leitura("juros_reais", resumo)
 
     @staticmethod
     def _tabela_larga(

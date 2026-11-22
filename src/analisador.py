@@ -181,6 +181,7 @@ class AnalisadorDados:
         resultado.index = resultado.index.to_timestamp()
         resultado.index.name = "data"
         return resultado.reset_index()
+
     @staticmethod
     def largo_para_longo(tabela_larga: pd.DataFrame) -> pd.DataFrame:
         """Converte uma tabela larga (índice=data, colunas=modalidades) para o formato longo.

@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from src.analisador import AnalisadorDados
+from src.analise_interpretativa import AnaliseInterpretativa
 from src.dashboard import Dashboard
 from src.fonte_dados import FonteBCB
 from src.indicadores import VariacaoVsMedia12m, Volatilidade12m, ZScore
@@ -94,6 +95,7 @@ def main() -> None:
         descricao=descricao,
         series_folha=SERIES_FOLHA,
         series_macro=series_macro,
+        analise=AnaliseInterpretativa(),
     )
 
     dashboard.renderizar()
