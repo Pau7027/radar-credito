@@ -372,6 +372,7 @@ class Dashboard:
                         tabela_larga[colunas_validas],
                         rotulos={"selic": "Selic meta (% a.a.)", "ipca": "IPCA (% a.m.)"},
                     )
+                    st.plotly_chart(fig_heat, width="stretch")
                     # TODO (issue #9): texto interpretativo
                 except ValueError as erro:
                     st.warning(str(erro))
@@ -541,23 +542,9 @@ class Dashboard:
             "Juros reais ex-post: (1 + Selic) / (1 + IPCA acumulado em 12 meses) - 1, "
             "usando a Selic meta no fim de cada mês."
         )
-        # TODO (issue #9): texto interpretativo    
+        # TODO (issue #9): texto interpretativo
+
     @staticmethod
-    def _tabela_larga(
-        dados: pd.DataFrame,
-        coluna_data: str = "data",
-        coluna_modalidade: str = "modalidade",
-        coluna_valor: str = "valor",
-    ) -> pd.DataFrame:
-        """Converte dados no formato longo para tabela larga indexada por data."""
-        tabela = dados.pivot_table(
-            index=coluna_data,
-            columns=coluna_modalidade,
-            values=coluna_valor,
-            aggfunc="mean",
-        )
-        tabela.index = pd.to_datetime(tabela.index)
-        return tabela.sort_index()    
     def _tabela_larga(
         dados: pd.DataFrame,
         coluna_data: str = "data",
