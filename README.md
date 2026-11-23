@@ -10,9 +10,9 @@ Painel interativo sobre a inadimplência da carteira de crédito no Brasil entre
 | --- | --- | --- |
 | 1 | Paulo Enrique Pérez González | 00370839 |
 | 2 | Thiago Laurino Silva | 00372259 |
-| 3 | [Preencher nome] | [Preencher RA] |
-| 4 | [Preencher nome] | [Preencher RA] |
-| 5 | [Preencher nome] | [Preencher RA] |
+| 3 | Giovana Lordello Guimarães | 00376042 |
+| 4 | Gabriel Sousa de Carvalho | 00369956 |
+| 5 | Julia Amy Yoshioka | 00370507 |
 
 ## Problema e objetivo
 
