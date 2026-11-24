@@ -3,5 +3,4 @@ numpy
 requests
 plotly
 streamlit
-statsmodels
 pytest

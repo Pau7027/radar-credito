@@ -45,6 +45,12 @@ python -m pytest tests/test_visualizador.py
 
 ## Dados e variáveis
 
+Para executar o notebook de exploração no VS Code ou em um ambiente Jupyter, instale também as dependências do kernel e dos gráficos no mesmo ambiente Python.
+
+```bash
+python -m pip install -r requirements-notebook.txt
+```
+
 A fonte é a API pública do Sistema Gerenciador de Séries Temporais (SGS) do Banco Central do Brasil. O painel solicita dados de crédito de novembro de 2016 a outubro de 2026. A análise interpretativa usa os 119 meses de inadimplência disponíveis na amostra versionada, de novembro de 2016 a setembro de 2026. A coleta de Selic e IPCA começa em novembro de 2015 para dar histórico ao cálculo da inflação acumulada em 12 meses.
 
 | Código SGS | Série | Frequência e unidade |
@@ -127,6 +133,7 @@ A amostra cobre essencialmente um ciclo de queda e alta. Tendências em comum e 
 | `notebooks/` | Exploração inicial das séries de crédito |
 | `tests/` | Testes das visualizações e roteiro manual da coleta |
 | `requirements.txt` | Dependências Python |
+| `requirements-notebook.txt` | Dependências para executar o notebook de exploração |
 
 ## Referências
 
