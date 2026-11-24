@@ -37,10 +37,10 @@ python -m streamlit run streamlit_app.py
 
 Abra `http://localhost:8501` no navegador. A API é pública e dispensa credenciais. Se a consulta falhar, o aplicativo recorre aos CSVs versionados em `data/`.
 
-Para executar os testes automatizados dos gráficos, use:
+Execute a suíte de testes automatizados com o comando abaixo. Ela usa respostas simuladas da API e CSVs locais.
 
 ```bash
-python -m pytest tests/test_visualizador.py
+python -m pytest
 ```
 
 ## Dados e variáveis
@@ -125,7 +125,7 @@ A amostra cobre essencialmente um ciclo de queda e alta. Tendências em comum e 
 | `src/` | Coleta, análise, indicadores, gráficos e interface |
 | `data/` | Cache CSV por código SGS |
 | `notebooks/` | Exploração inicial das séries de crédito |
-| `tests/` | Testes das visualizações e roteiro manual da coleta |
+| `tests/` | Testes da coleta, do analisador, dos indicadores, dos gráficos e do painel, além do roteiro manual da coleta |
 | `requirements.txt` | Dependências Python |
 
 ## Referências
